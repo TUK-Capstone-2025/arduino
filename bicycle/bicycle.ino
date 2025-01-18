@@ -56,5 +56,5 @@ void loop() {
     shockCount = 0; // 충격 횟수 초기화
   }
 
-  delay(500); // 작은 딜레이
+  delay(500); 
 }
