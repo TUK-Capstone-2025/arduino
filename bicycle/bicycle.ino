@@ -14,12 +14,20 @@ const float GYRO_THRESHOLD = 200.0;  // 각속도 변화량 임계값 (각도/s)
 const float TILT_ANGLE_THRESHOLD = 45.0; // 넘어짐 기울기 각도 임계값 (각도)
 const unsigned long RECOVERY_TIME = 10000; // 정상 범주 복귀 허용 시간 (10초)
 
+// 조도 센서와 LED 핀 설정
+#define CDS_SENSOR_PIN A0 // 조도 센서 아날로그 핀
+#define LED_PIN 6         // LED 핀 (디지털 핀)
+
+// 조도 센서 임계값 (이 값 이상일 때 어둡다고 판단)
+const int LIGHT_THRESHOLD = 300; // 조도 센서 임계값 (필요에 따라 조정)
+
 // 상태 변수
 bool isTilted = false;            // 현재 기울어진 상태 여부
 bool isImpactDetected = false;    // 충격 발생 여부
 unsigned long tiltStartTime = 0;  // 기울기 발생 시간
 unsigned long lastUltrasonicTime = 0;  // 초음파 측정 시간 관리
 unsigned long lastNormalStatusTime = 0; // 정상 상태 출력 시간 관리
+unsigned long lastLightCheckTime = 0;   // 조도 센서 확인 시간 관리
 
 void setup() {
   Serial.begin(9600);
@@ -27,6 +35,7 @@ void setup() {
 
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT); // LED 핀을 출력으로 설정
 
   Wire.begin();
   mpu.initialize();
@@ -52,6 +61,12 @@ void loop() {
   if (currentTime - lastNormalStatusTime >= 1000) {
     analyzeMPU6050(currentTime);
     lastNormalStatusTime = currentTime;
+  }
+
+  // 0.5초 간격으로 조도 센서 데이터 확인
+  if (currentTime - lastLightCheckTime >= 500) {
+    checkLightSensor();
+    lastLightCheckTime = currentTime;
   }
 }
 
@@ -146,7 +161,20 @@ void analyzeMPU6050(unsigned long currentTime) {
   isImpactDetected = false;
 }
 
-// ACCEL_THRESHOLD: 가속도 변화량 임계값 (2.5g 이상이면 충격으로 판단)
-// GYRO_THRESHOLD: 각속도 변화량 임계값 (200°/s 이상이면 충격으로 판단)
-// TILT_ANGLE_THRESHOLD: 넘어짐으로 판단할 기울기 각도 (45° 이상)
-// RECOVERY_TIME: 기울어진 상태가 지속될 수 있는 허용 시간 (10초)
+// 조도 센서 값 확인 및 LED 제어
+void checkLightSensor() {
+  int lightValue = analogRead(CDS_SENSOR_PIN); // 조도 센서 값 읽기
+
+  // 시리얼 모니터에 조도 센서 값 출력
+  Serial.print("조도 센서 값: ");
+  Serial.println(lightValue);
+
+  // 밝을 때 LED 끄기, 어두울 때 LED 켜기
+  if (lightValue > LIGHT_THRESHOLD) { // 센서 값이 높으면 어둡다고 판단
+    digitalWrite(LED_PIN, HIGH); // LED 켜기
+    Serial.println("LED ON (어두움)");
+  } else {
+    digitalWrite(LED_PIN, LOW); // LED 끄기
+    Serial.println("LED OFF (밝음)");
+  }
+}
