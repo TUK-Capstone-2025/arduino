@@ -15,6 +15,7 @@ const int LIGHT_THRESHOLD = 300;
 const unsigned long SENSOR_UPDATE_INTERVAL = 500;
 const unsigned long MPU_UPDATE_INTERVAL = 500;  
 const unsigned long SPEED_UPDATE_INTERVAL = 1000;
+const unsigned long ACCIDENT_TIME_THRESHOLD = 20000; // 사고 감지 후 20초 이내 복귀되지 않으면 ACCIDENT 전송
 
 volatile unsigned long lastWheelTime = 0;
 volatile float wheelRPM = 0;
@@ -22,14 +23,15 @@ const float WHEEL_CIRCUMFERENCE = 2.1; // 휠 둘레 (미터 단위)
 
 unsigned long lastUpdateTime = 0;
 unsigned long lastMpuUpdateTime = 0;
-unsigned long lastAccidentTime = 0;
 unsigned long lastSpeedUpdateTime = 0;
+unsigned long accidentStartTime = 0; // 사고 감지 시작 시간
 
 MPU6050 mpu;
 
 // 상태 변수
 bool isTilted = false;
 bool isImpactDetected = false;
+bool accidentDetected = false; // 사고 감지 여부
 
 void wheelRotationDetected() {
   unsigned long currentTime = millis();
@@ -68,7 +70,6 @@ void setup() {
   if (mpu.testConnection()) {
     Serial.println("자이로 센서 연결 성공");
   } else {
-    // 실패라고 뜨면 사고 감지 불가능
     Serial.println("자이로 센서 연결 실패");
   }
 
@@ -94,7 +95,7 @@ void loop() {
     delay(100);
 
     // LED 점등/소등 변경 주기 (2초 동안 변화가 없을 시 변경)
-    // 안하면 잦은 깜빡임으로 맞은 편 라이더에게 피해를 줌
+    // 잦은 깜빡임으로 맞은 편 라이더에게 피해를 줄 수 있음
     static unsigned long lastLightChange = 0;
     if (currentTime - lastLightChange > 2000) {
       if (lightValue > LIGHT_THRESHOLD) {
@@ -123,11 +124,12 @@ void loop() {
 // sendSensorData() 함수는 JSON 데이터 전송을 위해 사용
 void sendSensorData(String key, float value) {
   String jsonBuffer = "{\"" + key + "\":" + String(value, 1) + "}\n";  
-  BT_SERIAL.print(jsonBuffer);  
+  BT_SERIAL.print(jsonBuffer + "\n");  
   Serial.println(jsonBuffer);
   delay(200); // 안드로이드 스튜디오에서 값 깨지면 딜레이 값 +
 }
 
+// 사고 감지 개선 로직 (기존 주석 유지)
 void analyzeMPU6050(unsigned long currentTime) {
   int16_t ax, ay, az, gx, gy, gz;
 
@@ -164,17 +166,22 @@ void analyzeMPU6050(unsigned long currentTime) {
     }
   }
 
-  // 사고 감지 조건문
+  // 사고 감지 로직 개선
   if (tiltDetected && impactDetected) {
-    sendSensorData("ACCIDENT", 1);
-    Serial.println("사고 발생 감지");
+    if (!accidentDetected) {
+      accidentStartTime = currentTime;
+      accidentDetected = true;
+    } else if (currentTime - accidentStartTime >= ACCIDENT_TIME_THRESHOLD) {
+      sendSensorData("ACCIDENT", 1);
+      Serial.println("사고 발생 감지 (20초 이상 복귀 안됨)");
+    }
   } else {
-    sendSensorData("ACCIDENT", 0);
+    accidentDetected = false;
   }
 }
 
 float measureDistance() {
-  static float lastValidDistance = 100; // 초기 임시 설정 값
+  static float lastValidDistance = 100; 
 
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
@@ -185,7 +192,6 @@ float measureDistance() {
   long duration = pulseIn(ECHO_PIN, HIGH, 50000);  
 
   if (duration == 0) {
-    // 측정 가능 거리 (4m) 초과 시 마지막 값 계속 반환
     return lastValidDistance;  
   }
 
@@ -193,10 +199,8 @@ float measureDistance() {
   
   if (distance > 400 || distance < 0) {
     return lastValidDistance; 
-    // 위에랑 동일한 매커니즘
   }
 
-  // 4m 이내 정상 측정 시 값 저장
   lastValidDistance = distance; 
   return distance;
 }
