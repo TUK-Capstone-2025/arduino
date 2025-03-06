@@ -9,13 +9,13 @@
 #define WARNING_DISTANCE 50
 #define HALL_SENSOR_PIN 2
 
-const float ACCEL_THRESHOLD = 2.5;     
+const float ACCEL_THRESHOLD = 1.1;  
 const float TILT_ANGLE_THRESHOLD = 45.0;
 const int LIGHT_THRESHOLD = 300;        
 const unsigned long SENSOR_UPDATE_INTERVAL = 500;
 const unsigned long MPU_UPDATE_INTERVAL = 500;  
 const unsigned long SPEED_UPDATE_INTERVAL = 1000;
-const unsigned long ACCIDENT_TIME_THRESHOLD = 20000; // 사고 감지 후 20초 이내 복귀되지 않으면 ACCIDENT 전송
+const unsigned long ACCIDENT_TIME_THRESHOLD = 5000; 
 
 volatile unsigned long lastWheelTime = 0;
 volatile float wheelRPM = 0;
@@ -94,8 +94,6 @@ void loop() {
     sendSensorData("LIGHT", lightValue); 
     delay(100);
 
-    // LED 점등/소등 변경 주기 (2초 동안 변화가 없을 시 변경)
-    // 잦은 깜빡임으로 맞은 편 라이더에게 피해를 줄 수 있음
     static unsigned long lastLightChange = 0;
     if (currentTime - lastLightChange > 2000) {
       if (lightValue > LIGHT_THRESHOLD) {
@@ -121,15 +119,13 @@ void loop() {
   }
 }
 
-// sendSensorData() 함수는 JSON 데이터 전송을 위해 사용
 void sendSensorData(String key, float value) {
   String jsonBuffer = "{\"" + key + "\":" + String(value, 1) + "}\n";  
   BT_SERIAL.print(jsonBuffer + "\n");  
   Serial.println(jsonBuffer);
-  delay(200); // 안드로이드 스튜디오에서 값 깨지면 딜레이 값 +
+  delay(200); 
 }
 
-// 사고 감지 개선 로직 (기존 주석 유지)
 void analyzeMPU6050(unsigned long currentTime) {
   int16_t ax, ay, az, gx, gy, gz;
 
@@ -140,9 +136,12 @@ void analyzeMPU6050(unsigned long currentTime) {
   float accelX = ax / 16384.0, accelY = ay / 16384.0, accelZ = az / 16384.0;
   float totalAccel = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
 
-  // 충격 감지 (임계값 2.5G 이상일 경우 1 아님 0)
-  bool impactDetected = (totalAccel > ACCEL_THRESHOLD);
-  sendSensorData("IMPACT", impactDetected ? 1 : 0);
+  bool impactNow = (totalAccel > ACCEL_THRESHOLD);
+  if (impactNow) {
+    isImpactDetected = true;  
+  }
+
+  sendSensorData("IMPACT", isImpactDetected ? 1 : 0);
   delay(100);
 
   float tiltAngle = sqrt(pow(atan2(accelY, accelZ) * 180 / PI, 2) + 
@@ -151,32 +150,32 @@ void analyzeMPU6050(unsigned long currentTime) {
   sendSensorData("TILT", tiltAngle);
   delay(100);
 
-  // 넘어짐 감지 (45도 이상 기울어짐)
-  bool tiltDetected = (tiltAngle > TILT_ANGLE_THRESHOLD);
+  bool tiltNow = (tiltAngle > TILT_ANGLE_THRESHOLD);
 
-  if (tiltDetected) {
-    if (!isTilted) {
-      isTilted = true;
-      Serial.println("넘어짐 감지");
-    }
-  } else {
-    if (isTilted) {
-      isTilted = false;
-      Serial.println("정상 주행 각도로 복귀");
-    }
+  if (tiltNow) {
+    isTilted = true;
   }
 
-  // 사고 감지 로직 개선
-  if (tiltDetected && impactDetected) {
+  if (isTilted) {
+    Serial.println("넘어짐 감지");
+  }
+
+  if (isTilted && !tiltNow) {
+    isTilted = false;
+    accidentDetected = false;
+    isImpactDetected = false;
+    sendSensorData("ACCIDENT", 0);
+    Serial.println("정상각도로 복귀 - 사고 감지 해제");
+  }
+
+  if (isTilted && isImpactDetected) {
     if (!accidentDetected) {
       accidentStartTime = currentTime;
       accidentDetected = true;
     } else if (currentTime - accidentStartTime >= ACCIDENT_TIME_THRESHOLD) {
       sendSensorData("ACCIDENT", 1);
-      Serial.println("사고 발생 감지 (20초 이상 복귀 안됨)");
+      Serial.println("사고 발생 감지 (5초 이상 복귀 안됨)");
     }
-  } else {
-    accidentDetected = false;
   }
 }
 
