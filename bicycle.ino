@@ -31,7 +31,7 @@ unsigned long lastSpeedUpdateTime = 0;
 unsigned long accidentStartTime = 0; // 사고 감지 시작 시간
 unsigned long brakeLightOnTime = 0; // 브레이크 점등 시작 시간
 
-MPU6050 mpu;
+MPU6050 mpu; //
 
 // 상태 변수
 bool isTilted = false;
